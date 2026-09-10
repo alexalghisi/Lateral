@@ -79,6 +79,16 @@ services:
             # against the exact image that gets deployed, otherwise "it passed
             # in CI" says nothing about what is running in production.
             # Mounting read-only satisfies both: same image, tests available.
+            # Application source, mounted read-write for the development loop.
+            #
+            # The image still BAKES app/ in (see the Dockerfile), and that
+            # baked copy is what runs in production -- this mount merely
+            # overlays it locally. Two concrete reasons it is worth having:
+            # editing a route no longer requires an image rebuild, and
+            # `ruff format` run inside the container writes its changes to the
+            # repository instead of into a container layer that is discarded on
+            # the next build.
+            - ./app:/srv/app/app
             # Writable so `ruff format` can rewrite test files in place. The
             # production image ships no tests at all (see the Dockerfile), so
             # this mount exists purely for the development loop.
