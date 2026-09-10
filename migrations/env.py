@@ -20,17 +20,17 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from app.core.config import get_settings
-from app.db.base import Base
-
-# IMPORTANT -- model modules must be imported before autogenerate runs.
+# IMPORTANT -- `app.models` is imported for its SIDE EFFECT, not for a name.
 # Alembic diffs `Base.metadata` against the live database, and a model class is
 # only registered on that metadata once its module has been imported. A model
 # that is never imported here is invisible to autogenerate, which will happily
-# emit an empty migration and give no warning at all. Model imports are added
-# to this block as the domain grows.
+# emit an empty migration and give no warning at all.
 #
-# (No model modules exist yet: they arrive with the domain layer.)
+# Importing the package suffices: app/models/__init__.py imports every model
+# module, so there is one place to keep current rather than two.
+import app.models  # noqa: F401
+from app.core.config import get_settings
+from app.db.base import Base
 
 config = context.config
 

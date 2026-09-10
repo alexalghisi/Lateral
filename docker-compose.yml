@@ -81,6 +81,12 @@ services:
             # Mounting read-only satisfies both: same image, tests available.
             - ./tests:/srv/app/tests:ro
             - ./pyproject.toml:/srv/app/pyproject.toml:ro
+            # Writable, unlike the mounts above: `alembic revision` generates
+            # new files and they must land in the repository rather than
+            # inside a container layer that vanishes on the next rebuild.
+            # The production image still bakes migrations/ in (see the
+            # Dockerfile) -- this mount only overlays it during development.
+            - ./migrations:/srv/app/migrations
         healthcheck:
             # Readiness, not liveness: Nginx should only be pointed at this
             # container once it can actually reach the database.
