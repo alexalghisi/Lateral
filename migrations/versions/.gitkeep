@@ -1,0 +1,2 @@
+# Placeholder so the empty versions/ directory is tracked by git.
+# Alembic requires this directory to exist before the first revision is created.

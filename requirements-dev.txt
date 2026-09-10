@@ -1,0 +1,19 @@
+# ---------------------------------------------------------------------------
+# Development and CI dependencies.
+#
+# Installed on top of requirements.txt. Never installed into the production
+# image stage (see docker/api/Dockerfile).
+# ---------------------------------------------------------------------------
+-r requirements.txt
+
+# --- Testing -----------------------------------------------------------------
+pytest==9.1.1
+pytest-cov==7.1.0
+
+# Required by Starlette's TestClient, which is an httpx transport wrapper.
+httpx==0.28.1
+
+# --- Static analysis ---------------------------------------------------------
+# Ruff replaces flake8 + isort + a large share of pylint in a single fast tool.
+ruff==0.16.7
+mypy==2.3.1
