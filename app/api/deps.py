@@ -97,6 +97,33 @@ def get_current_user(token: BearerToken, session: DbSession) -> User:
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
+# The same extractor with `auto_error=False`, so a missing Authorization header
+# yields None instead of an automatic 401.
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
+
+OptionalBearerToken = Annotated[str | None, Depends(oauth2_scheme_optional)]
+
+
+def get_optional_current_user(token: OptionalBearerToken, session: DbSession) -> User | None:
+    """Resolve the caller if they supplied a token, otherwise None.
+
+    For endpoints that are PUBLIC but behave differently for staff -- browsing
+    a menu is the case here, where staff additionally see unavailable items.
+
+    Note the asymmetry, which is deliberate: a MISSING token yields an
+    anonymous caller, but a PRESENT-BUT-INVALID token still raises. Silently
+    treating a bad token as anonymous would leave a client with an expired
+    session quietly seeing less data than it expects, with no indication that
+    anything is wrong. Absent is a legitimate state; invalid is an error.
+    """
+    if token is None:
+        return None
+
+    return get_current_user(token, session)
+
+
+OptionalCurrentUser = Annotated[User | None, Depends(get_optional_current_user)]
+
 
 def require_role(*allowed_roles: UserRole) -> Callable[[User], User]:
     """Build a dependency that admits only the given roles.
