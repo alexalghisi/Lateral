@@ -1,0 +1,65 @@
+# ---------------------------------------------------------------------------
+# Tooling configuration.
+#
+# ARCHITECTURAL DECISION: this file configures tools only; it declares no build
+# system and no package metadata. The application is deployed as a container
+# image, not published to an index, so packaging machinery would be ceremony
+# with no consumer. Dependencies stay in the requirements files, where Docker
+# layer caching can key on them directly.
+#
+# Consolidating pytest, Ruff and mypy here keeps the repository root free of
+# setup.cfg / .flake8 / pytest.ini / mypy.ini sprawl. One file, one source of
+# truth for developer tooling.
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+# `pythonpath` lets tests import `app.*` without an editable install or any
+# sys.path manipulation inside conftest.py.
+pythonpath = ["."]
+testpaths = ["tests"]
+
+# -q          quiet progress, readable failures
+# --strict-markers  an unregistered marker is an error, not a silent typo.
+#                   Without this, `@pytest.mark.integraton` would pass silently
+#                   and quietly exclude tests from every run.
+addopts = "-q --strict-markers"
+
+markers = [
+    "integration: exercises real infrastructure (PostgreSQL). Requires a reachable database.",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/W  pycodestyle   F   pyflakes      I   import ordering (replaces isort)
+# B    bugbear       UP  pyupgrade     C4  comprehensions
+# SIM  simplify      RUF Ruff-specific
+select = ["E", "W", "F", "I", "B", "UP", "C4", "SIM", "RUF"]
+
+[tool.ruff.format]
+# PEP 8 baseline. Enforced mechanically so indentation and quoting never become
+# review discussion topics.
+indent-style = "space"
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.12"
+
+# Strict-adjacent, deliberately not `strict = true`. Full strict mode forces
+# heavy annotation of third-party integration seams (SQLAlchemy, Alembic) for
+# little defect-catching value. These flags capture the checks that actually
+# find bugs in this codebase.
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+check_untyped_defs = true
+
+# Alembic's generated migration scripts are templated, effectively write-once,
+# and reviewed as SQL rather than as typed Python. Type-checking them produces
+# noise without insight.
+exclude = ["^migrations/versions/"]

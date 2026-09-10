@@ -1,0 +1,29 @@
+# ---------------------------------------------------------------------------
+# Keep the Docker build context minimal.
+#
+# Everything listed here is either irrelevant to the image, or actively harmful
+# to include (secrets, host-specific virtualenvs). A small context also means a
+# faster build and fewer spurious cache invalidations.
+# ---------------------------------------------------------------------------
+.git/
+.gitignore
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Never bake real credentials into an image layer.
+.env
+.env.*
+!.env.example
+
+.idea/
+.vscode/
+.DS_Store

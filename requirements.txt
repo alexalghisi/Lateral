@@ -1,0 +1,48 @@
+# ---------------------------------------------------------------------------
+# Runtime dependencies (production image).
+#
+# ARCHITECTURAL DECISION: exact pins (`==`) rather than ranges (`~=`, `>=`).
+# A takeaway platform is a deployed service, not a redistributable library.
+# Services must favour reproducibility over resolver flexibility: the image we
+# test in CI has to be byte-for-byte the image that reaches production. Ranges
+# would let a transitive release change behaviour between build and deploy.
+#
+# Development-only tooling deliberately lives in `requirements-dev.txt` so the
+# production image never ships a test runner, a linter, or their transitive
+# dependencies. Smaller image, smaller attack surface.
+# ---------------------------------------------------------------------------
+
+# --- Web framework -----------------------------------------------------------
+fastapi==0.141.1
+
+# ASGI server. NOTE: we intentionally do NOT depend on Gunicorn.
+# Uvicorn has supported multi-process supervision natively via `--workers` for
+# some time, and the `uvicorn.workers.UvicornWorker` class that Gunicorn
+# deployments historically relied on has been removed from modern Uvicorn.
+# Running Uvicorn standalone removes an entire process supervisor and its
+# configuration surface for zero loss of capability. See docker/api/entrypoint.sh.
+uvicorn[standard]==0.52.4
+
+# --- Persistence -------------------------------------------------------------
+sqlalchemy==2.0.52
+alembic==1.19.2
+
+# PostgreSQL driver. psycopg 3 (not psycopg2) is the current generation: it has
+# first-class SQLAlchemy 2.0 support and a maintained binary wheel, which keeps
+# the Docker build free of a C toolchain.
+psycopg[binary]==3.3.5
+
+# --- Validation / configuration ----------------------------------------------
+pydantic==2.13.5
+pydantic-settings==2.15.0
+
+# --- Security ----------------------------------------------------------------
+# PyJWT over python-jose: smaller, actively maintained, and it does not drag in
+# a full JOSE/JWE implementation we would never use for simple HS256 tokens.
+pyjwt==2.13.0
+
+# Argon2id is the current OWASP-recommended password hashing function. We bind
+# to argon2-cffi directly rather than through passlib: passlib has been
+# effectively unmaintained for years and its bcrypt backend is a known source of
+# version-detection breakage. One less abstraction, one less liability.
+argon2-cffi==25.1.0

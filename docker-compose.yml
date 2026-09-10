@@ -1,0 +1,125 @@
+# ---------------------------------------------------------------------------
+# Local development / evaluation stack.
+#
+#   nginx  ->  api (uvicorn)  ->  db (postgresql)
+#
+# ARCHITECTURAL DECISION -- dependency ordering is expressed with health
+# conditions, not with `depends_on` alone.
+#
+# Plain `depends_on` waits for a container to *start*, not for the service
+# inside it to be *ready*. PostgreSQL takes a few seconds to accept connections
+# after its process launches, so the API would run `alembic upgrade head`
+# against a database that is not listening yet and exit. That failure is
+# intermittent and timing-dependent -- it passes on a warm laptop and fails in
+# CI -- which is the worst kind of bug to inherit. `condition: service_healthy`
+# removes the race entirely.
+#
+# Note the absence of a top-level `version:` key. It has been obsolete since
+# Compose v2 and current versions emit a warning when it is present.
+# ---------------------------------------------------------------------------
+
+services:
+    # =========================== PostgreSQL ================================
+    db:
+        image: postgres:17-alpine
+        restart: unless-stopped
+        environment:
+            POSTGRES_USER: ${POSTGRES_USER}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+            POSTGRES_DB: ${POSTGRES_DB}
+        healthcheck:
+            # `pg_isready` reports readiness to accept connections, which is
+            # the actual precondition the API needs. The -U/-d flags matter:
+            # without them pg_isready probes as the wrong role and can report
+            # healthy while the application's credentials still fail.
+            test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+            interval: 5s
+            timeout: 5s
+            retries: 10
+            # Do not count the slow initial database creation as failures.
+            start_period: 10s
+        volumes:
+            # Named volume, not a bind mount: data survives `docker compose down`
+            # and stays off the host filesystem, avoiding the file-permission and
+            # performance problems bind-mounted database files cause on macOS.
+            - postgres_data:/var/lib/postgresql/data
+        ports:
+            # Published for local inspection with psql or a GUI client only.
+            # Remove this mapping in any shared environment.
+            - "${POSTGRES_HOST_PORT:-5432}:5432"
+        networks:
+            - lateral
+
+    # =============================== API ===================================
+    api:
+        build:
+            context: .
+            dockerfile: docker/api/Dockerfile
+            args:
+                # Development dependencies are installed locally so the test
+                # suite can run inside the same image the application runs in.
+                # The production build omits this argument.
+                INSTALL_DEV: "true"
+        restart: unless-stopped
+        env_file:
+            - .env
+        environment:
+            # Overrides .env so the API always addresses the database by its
+            # Compose service name, whatever a developer set for host tooling.
+            POSTGRES_HOST: db
+            POSTGRES_PORT: 5432
+            UVICORN_WORKERS: 2
+        depends_on:
+            db:
+                condition: service_healthy
+        volumes:
+            # Test code and tooling configuration are mounted, not baked in.
+            # The production image must not ship a test suite -- it is dead
+            # weight and extra attack surface -- but the suite still has to run
+            # against the exact image that gets deployed, otherwise "it passed
+            # in CI" says nothing about what is running in production.
+            # Mounting read-only satisfies both: same image, tests available.
+            - ./tests:/srv/app/tests:ro
+            - ./pyproject.toml:/srv/app/pyproject.toml:ro
+        healthcheck:
+            # Readiness, not liveness: Nginx should only be pointed at this
+            # container once it can actually reach the database.
+            test:
+                - CMD-SHELL
+                - >-
+                    python -c "import urllib.request,sys;
+                    sys.exit(0 if urllib.request.urlopen(
+                    'http://127.0.0.1:8000/health/ready', timeout=3).status == 200 else 1)"
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            # Generous, because the container runs migrations before it serves.
+            start_period: 30s
+        ports:
+            # Direct access for debugging. The supported entrypoint is Nginx.
+            - "${API_HOST_PORT:-8000}:8000"
+        networks:
+            - lateral
+
+    # ============================== Nginx ==================================
+    nginx:
+        image: nginx:1.27-alpine
+        restart: unless-stopped
+        depends_on:
+            api:
+                condition: service_healthy
+        volumes:
+            # Read-only: the proxy has no legitimate reason to modify its own
+            # configuration, and a writable mount is an escalation path.
+            - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+        ports:
+            - "${NGINX_HOST_PORT:-8080}:80"
+        networks:
+            - lateral
+
+networks:
+    lateral:
+        driver: bridge
+
+volumes:
+    postgres_data:
