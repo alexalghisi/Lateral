@@ -23,6 +23,7 @@ import logging
 from fastapi import FastAPI
 
 from app.api.errors import register_exception_handlers
+from app.api.router import api_router
 from app.api.routes import health
 from app.core.config import Settings, get_settings
 
@@ -75,7 +76,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Routers are registered here and only here. Keeping registration in the
     # composition root means the full route surface is auditable in one place,
     # instead of being discovered by importing modules for their side effects.
+    # Health probes are mounted at the root, deliberately outside the versioned
+    # API: they are an infrastructure contract with the orchestrator, and an
+    # orchestrator's probe configuration must not have to change because the
+    # API released a new version.
     app.include_router(health.router)
+
+    # Everything else lives under /api/v1.
+    app.include_router(api_router)
 
     return app
 
