@@ -59,6 +59,21 @@ class Settings(BaseSettings):
     # is a service that ships one to production.
     SECRET_KEY: SecretStr
 
+    # --- JSON Web Tokens -----------------------------------------------------
+    # HS256 (symmetric) rather than RS256 (asymmetric). Asymmetric signing earns
+    # its extra key-management burden when tokens are verified by parties who
+    # must not be able to mint them -- separate services, third parties. Here a
+    # single service both issues and verifies, so the private/public split would
+    # add operational complexity and protect against nothing.
+    JWT_ALGORITHM: str = "HS256"
+
+    # Short-lived by design. A JWT cannot be revoked before it expires without
+    # introducing a server-side denylist -- which would reintroduce the per-
+    # request database lookup that stateless tokens exist to avoid. The lever
+    # that remains is lifetime: 30 minutes bounds the damage from a leaked
+    # token while keeping re-authentication infrequent enough to be usable.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, ge=1)
+
     # --- PostgreSQL ----------------------------------------------------------
     POSTGRES_USER: str
     POSTGRES_PASSWORD: SecretStr

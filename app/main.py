@@ -22,6 +22,7 @@ import logging
 
 from fastapi import FastAPI
 
+from app.api.errors import register_exception_handlers
 from app.api.routes import health
 from app.core.config import Settings, get_settings
 
@@ -66,6 +67,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url="/redoc" if settings.docs_enabled else None,
         openapi_url="/openapi.json" if settings.docs_enabled else None,
     )
+
+    # Domain errors become HTTP responses through one central mapping, so no
+    # service or repository ever needs to import FastAPI. See app/api/errors.py.
+    register_exception_handlers(app)
 
     # Routers are registered here and only here. Keeping registration in the
     # composition root means the full route surface is auditable in one place,
