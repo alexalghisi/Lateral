@@ -21,7 +21,13 @@ from sqlalchemy.orm import DeclarativeBase
 
 # %(table_name)s, %(column_0_N_name)s and friends are SQLAlchemy naming tokens.
 NAMING_CONVENTION = {
-    "ix": "ix_%(column_0_N_name)s",  # index
+    # The table name is part of the index name deliberately. The more common
+    # "ix_%(column_0_N_name)s" collides the moment two tables index a column of
+    # the same name -- here, both `menu_items.restaurant_id` and
+    # `orders.restaurant_id` would want to be called `ix_restaurant_id`, and
+    # PostgreSQL index names are unique per schema. Autogenerate produced
+    # exactly that collision before this was fixed.
+    "ix": "ix_%(table_name)s_%(column_0_N_name)s",  # index
     "uq": "uq_%(table_name)s_%(column_0_N_name)s",  # unique constraint
     "ck": "ck_%(table_name)s_%(constraint_name)s",  # check constraint
     "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
