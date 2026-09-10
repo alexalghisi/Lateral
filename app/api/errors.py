@@ -33,6 +33,7 @@ from app.domain.errors import (
     NotFoundError,
     PermissionDeniedError,
 )
+from app.services.auth import AuthenticationFailedError
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,20 @@ def register_exception_handlers(app: FastAPI) -> None:
         Omitting that header is a common and consequential oversight: it is how
         a client learns *how* to authenticate, and standard HTTP tooling relies
         on it to decide whether retrying with credentials is worthwhile.
+        """
+        response = _problem(status.HTTP_401_UNAUTHORIZED, str(exc))
+        response.headers["WWW-Authenticate"] = "Bearer"
+        return response
+
+    @app.exception_handler(AuthenticationFailedError)
+    def _handle_authentication_failed(_: Request, exc: AuthenticationFailedError) -> JSONResponse:
+        """401 for rejected credentials at login.
+
+        Shares its shape with the invalid-token handler because both mean the
+        same thing to a client: you are not authenticated, and here is how to
+        become authenticated. The message is identical for every underlying
+        cause -- unknown email, wrong password, deactivated account -- so the
+        endpoint cannot be used to enumerate which addresses hold accounts.
         """
         response = _problem(status.HTTP_401_UNAUTHORIZED, str(exc))
         response.headers["WWW-Authenticate"] = "Bearer"
