@@ -79,7 +79,10 @@ services:
             # against the exact image that gets deployed, otherwise "it passed
             # in CI" says nothing about what is running in production.
             # Mounting read-only satisfies both: same image, tests available.
-            - ./tests:/srv/app/tests:ro
+            # Writable so `ruff format` can rewrite test files in place. The
+            # production image ships no tests at all (see the Dockerfile), so
+            # this mount exists purely for the development loop.
+            - ./tests:/srv/app/tests
             - ./pyproject.toml:/srv/app/pyproject.toml:ro
             # Writable, unlike the mounts above: `alembic revision` generates
             # new files and they must land in the repository rather than
