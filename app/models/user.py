@@ -1,33 +1,16 @@
-"""User accounts and roles."""
-
-from enum import StrEnum
+"""User accounts."""
 
 from sqlalchemy import Boolean, Enum, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.domain.roles import UserRole
 from app.models.mixins import IdentityMixin, TimestampMixin
 
-
-class UserRole(StrEnum):
-    """Authorisation roles.
-
-    Deliberately a closed set of two rather than a general permission system.
-    The specification distinguishes exactly two kinds of actor -- customers who
-    browse and order, and internal staff who manage menus and advance order
-    statuses. Building a role/permission/grant framework for two roles is
-    speculative generality: it triples the surface area to secure and test in
-    exchange for flexibility nobody has asked for. YAGNI, applied to the part
-    of the system where extra complexity is most dangerous.
-
-    If per-permission granularity is ever needed, this enum becomes a foreign
-    key to a roles table; nothing outside the authorisation dependency changes,
-    because routes declare the role they require rather than inspecting users
-    directly.
-    """
-
-    CUSTOMER = "customer"
-    ADMIN = "admin"
+# Re-exported so `from app.models.user import UserRole` keeps working and the
+# enum remains discoverable from the model that stores it. The definition lives
+# in the domain layer -- see app/domain/roles.py for why.
+__all__ = ["User", "UserRole"]
 
 
 class User(IdentityMixin, TimestampMixin, Base):
