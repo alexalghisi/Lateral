@@ -15,6 +15,12 @@
 # --- Web framework -----------------------------------------------------------
 fastapi==0.141.1
 
+# Parses form-encoded request bodies. Required by the login endpoint, which
+# implements the OAuth2 password flow -- that specification mandates form
+# encoding rather than JSON, and honouring it is what lets any standard OAuth2
+# client, including the interactive docs, authenticate against this API.
+python-multipart==0.0.32
+
 # ASGI server. NOTE: we intentionally do NOT depend on Gunicorn.
 # Uvicorn has supported multi-process supervision natively via `--workers` for
 # some time, and the `uvicorn.workers.UvicornWorker` class that Gunicorn
@@ -35,6 +41,13 @@ psycopg[binary]==3.3.5
 # --- Validation / configuration ----------------------------------------------
 pydantic==2.13.5
 pydantic-settings==2.15.0
+
+# Backs Pydantic's `EmailStr`. Pydantic deliberately does not vendor email
+# validation, because doing it correctly means implementing a genuinely
+# difficult specification -- the naive regex everyone reaches for rejects valid
+# addresses and accepts invalid ones. This library also normalises addresses,
+# which is what allows us to store one canonical form per account.
+email-validator==2.3.0
 
 # --- Security ----------------------------------------------------------------
 # PyJWT over python-jose: smaller, actively maintained, and it does not drag in
