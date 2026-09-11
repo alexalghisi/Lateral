@@ -1,0 +1,383 @@
+/* Lateral — theme matched to the README demo: cream surfaces, terracotta
+   accent, ink text. Flat and minimal; no gradients or shadows beyond a hairline. */
+
+:root {
+  --bg: #f4efe7;
+  --surface: #ffffff;
+  --surface-2: #faf6f0;
+  --ink: #1c1814;
+  --muted: #766e66;
+  --faint: #a79e94;
+  --line: #e6ded2;
+  --terracotta: #c96034;
+  --terracotta-dim: #a94f2a;
+  --gold: #b98a34;
+  --green: #4f8a55;
+  --red: #b1442f;
+  --chip: #ffece0;
+  --radius: 14px;
+  --maxw: 960px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+a {
+  color: var(--terracotta);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+h1,
+h2,
+h3 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 600;
+  line-height: 1.2;
+  margin: 0;
+}
+
+/* --- Layout ------------------------------------------------------------- */
+.nav {
+  background: var(--ink);
+  color: var(--surface-2);
+  border-bottom: 1px solid #000;
+}
+.nav-inner {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 14px 20px;
+}
+.brand {
+  font-family: Georgia, serif;
+  font-size: 20px;
+  color: #fff;
+}
+.brand span {
+  color: var(--terracotta);
+}
+.nav a {
+  color: #d9d1c7;
+  font-size: 14px;
+}
+.nav a.active {
+  color: #fff;
+}
+.nav .spacer {
+  flex: 1;
+}
+.nav .who {
+  font-size: 13px;
+  color: var(--faint);
+}
+
+.container {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 28px 20px 64px;
+}
+
+.page-title {
+  font-size: 26px;
+  margin-bottom: 4px;
+}
+.page-sub {
+  color: var(--muted);
+  margin-bottom: 24px;
+}
+
+/* --- Cards & grid ------------------------------------------------------- */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px;
+}
+.card h3 {
+  font-size: 18px;
+}
+.card .muted {
+  color: var(--muted);
+  font-size: 14px;
+}
+.card.clickable {
+  cursor: pointer;
+  transition: border-color 0.12s ease;
+}
+.card.clickable:hover {
+  border-color: var(--terracotta);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.muted {
+  color: var(--muted);
+}
+.faint {
+  color: var(--faint);
+}
+
+/* --- Buttons & forms ---------------------------------------------------- */
+.btn {
+  appearance: none;
+  border: 1px solid var(--terracotta);
+  background: var(--terracotta);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 16px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.btn:hover {
+  background: var(--terracotta-dim);
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.btn.ghost {
+  background: transparent;
+  color: var(--terracotta);
+}
+.btn.subtle {
+  background: var(--chip);
+  border-color: var(--chip);
+  color: var(--terracotta-dim);
+}
+.btn.small {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.field label {
+  font-size: 13px;
+  color: var(--muted);
+}
+.field input,
+.field select {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 15px;
+  background: var(--surface);
+  color: var(--ink);
+}
+.field input:focus,
+.field select:focus {
+  outline: 2px solid var(--terracotta);
+  outline-offset: -1px;
+}
+
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--chip);
+  border-radius: 10px;
+  padding: 4px 6px;
+}
+.stepper button {
+  border: none;
+  background: transparent;
+  color: var(--terracotta);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  width: 24px;
+}
+.stepper .qty {
+  min-width: 20px;
+  text-align: center;
+  font-weight: 600;
+}
+
+/* --- Status badges ------------------------------------------------------ */
+.badge {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--chip);
+  color: var(--terracotta-dim);
+}
+.badge.pending {
+  background: #fdf0e2;
+  color: var(--gold);
+}
+.badge.accepted {
+  background: #fbe7dc;
+  color: var(--terracotta-dim);
+}
+.badge.out_for_delivery {
+  background: #eef3ec;
+  color: var(--green);
+}
+.badge.delivered {
+  background: #e6f0e6;
+  color: var(--green);
+}
+.badge.cancelled {
+  background: #f3e3e0;
+  color: var(--red);
+}
+
+/* --- Order tracker ------------------------------------------------------ */
+.tracker {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 18px 0;
+}
+.tracker .step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+}
+.tracker .dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  flex: none;
+  position: relative;
+}
+.tracker .step.done .dot,
+.tracker .step.current .dot {
+  border-color: var(--terracotta);
+  background: var(--terracotta);
+}
+.tracker .step.done .dot::after,
+.tracker .step.current .dot::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: #fff;
+}
+.tracker .connector {
+  width: 2px;
+  height: 18px;
+  margin-left: 6px;
+  background: var(--line);
+}
+.tracker .connector.done {
+  background: var(--terracotta);
+}
+.tracker .step .label {
+  font-size: 14px;
+  color: var(--muted);
+}
+.tracker .step.done .label,
+.tracker .step.current .label {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* --- Misc --------------------------------------------------------------- */
+.notice {
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+.notice.error {
+  background: #f7e4e0;
+  color: var(--red);
+  border: 1px solid #eccec8;
+}
+.notice.info {
+  background: var(--chip);
+  color: var(--terracotta-dim);
+}
+.receipt {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 16px 18px;
+}
+.receipt .line {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+}
+.receipt .total {
+  border-top: 1px solid var(--line);
+  margin-top: 6px;
+  padding-top: 10px;
+  font-weight: 700;
+}
+.center-narrow {
+  max-width: 400px;
+  margin: 48px auto;
+}
+.spinner {
+  color: var(--muted);
+  padding: 40px 0;
+  text-align: center;
+}
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.tabs button {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.tabs button.active {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
