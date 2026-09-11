@@ -17,12 +17,10 @@ export function MenuPage() {
   const restaurant = useQuery({
     queryKey: ["restaurant", restaurantId],
     queryFn: () => api.getRestaurant(restaurantId),
-    enabled: Number.isFinite(restaurantId),
   });
   const menu = useQuery({
     queryKey: ["menu", restaurantId],
     queryFn: () => api.listMenu(restaurantId),
-    enabled: Number.isFinite(restaurantId),
   });
 
   const total = useMemo(() => {

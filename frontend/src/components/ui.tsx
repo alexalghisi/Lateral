@@ -4,7 +4,7 @@ import type { OrderStatus } from "../api/types";
 import { ORDER_FLOW, STATUS_LABELS } from "../api/types";
 
 /** Format integer cents as euros, e.g. 2100 -> "€21.00". */
-export function euros(cents: number): string {
+function euros(cents: number): string {
   return `€${(cents / 100).toFixed(2)}`;
 }
 

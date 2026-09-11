@@ -21,7 +21,6 @@ export function OrderDetailPage() {
   const { data: order, isLoading, error } = useQuery({
     queryKey: ["order", orderId],
     queryFn: () => api.getOrder(orderId),
-    enabled: Number.isFinite(orderId),
     // Live tracking: poll until the order reaches a terminal state.
     refetchInterval: (query) => {
       const s = query.state.data?.status;
