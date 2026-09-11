@@ -1,488 +1,186 @@
 # Lateral
 
-A small takeaway platform, full stack. Customers browse restaurants and menus,
-place orders, and track them through their lifecycle. Internal staff manage the
-catalogue and drive orders from `pending` to `delivered`.
+A small takeaway platform. Customers browse restaurants and menus, place orders,
+and track them from `pending` to `delivered`; staff (admin) manage the catalogue
+and advance orders. A **FastAPI** backend with a **React + TypeScript** web app
+(a bonus beyond the brief), served together behind Nginx.
 
 <p align="center">
-  <img src="docs/assets/how-it-works.gif" width="960" alt="A customer browses Trattoria Lateral, orders two Margheritas, and tracks the order from pending to delivered. The matching API calls appear beside the phone." />
+  <img src="docs/assets/how-it-works.gif" width="960" alt="A customer browses Trattoria Lateral, orders two Margheritas, and tracks the order from pending to delivered, with the matching API calls beside the phone." />
 </p>
 
-A **FastAPI + PostgreSQL** backend (SQLAlchemy, Alembic) and a **React +
-TypeScript** frontend (Vite), served together behind Nginx on one origin and
-packaged with Docker Compose. `docker compose up` builds and runs the whole
-thing.
+Built with FastAPI, PostgreSQL, SQLAlchemy + Alembic, Pydantic, JWT, React
+(Vite), Docker Compose and Nginx.
 
 **Author:** Alghisi Alessandro Paolo — <alexalghisi@gmail.com>
 
 ---
 
-## How it works
-
-The **React SPA** and the **API** answer on one origin behind **Nginx** (the
-only public entrypoint): Nginx serves the compiled frontend and forwards API
-calls to **Uvicorn** running the **FastAPI** app. On the backend, each layer has
-one job:
-
-| Layer | Responsibility |
-| --- | --- |
-| **Router** (`app/api/routes/`) | Read input, call a service, return the result. Auth is declared in the signature. |
-| **Schema** (`app/schemas/`) | The request/response contract. Omitting price, total and identity makes abuse *unrepresentable*. |
-| **Service** (`app/services/`) | Owns the use case and the transaction — the **only** layer that commits. |
-| **Repository** (`app/repositories/`) | Owns the SQL. No HTTP, no business rules. |
-| **Domain** (`app/domain/`) | Pure rules (state machine, roles, errors). Imports nothing, so it's testable in isolation. |
-| **PostgreSQL** | Source of truth: `CHECK` constraints, unique index and `RESTRICT` keys hold even if every layer above is bypassed. |
-
-Three ideas run through the design:
-
-- **Client states intent, server decides consequence** — price, total and
-  identity come from the menu and the token, not the request body.
-- **One layer commits** — repositories `flush`, only services `commit`, once per
-  use case, so order placement is all-or-nothing.
-- **Rules are pure data** — the lifecycle is a transition table in an import-free
-  domain, provable without a database or web server.
-
-Two mechanisms a reviewer will look for:
-
-**Authorisation is a type.** Role guards ride in the signature, so an endpoint
-lacking one simply has no admin argument — and OpenAPI documents access for free:
-
-```python
-DbSession    = Annotated[Session, Depends(get_db)]
-CurrentUser  = Annotated[User,    Depends(get_current_user)]
-CurrentAdmin = Annotated[User,    Depends(require_role(UserRole.ADMIN))]
-```
-
-**Errors carry meaning; the edge maps it to a status.** Services raise domain
-exceptions and never import `HTTPException`, so the mapping lives in one place:
-`NotFoundError` → 404, `ConflictError` → 409, `PermissionDeniedError` → 403,
-`InvalidTokenError` → 401.
-
----
-
 ## Quick start
 
-Docker with the Compose plugin is the only requirement — no Python or PostgreSQL
-on the host. On macOS, [Colima](https://github.com/abiosoft/colima) works as the
-runtime (`brew install colima docker docker-compose && colima start`).
+Docker with the Compose plugin is the only requirement.
 
 ```bash
-git clone https://github.com/alexalghisi/Lateral.git
-cd Lateral
-
+git clone https://github.com/alexalghisi/Lateral.git && cd Lateral
 cp .env.example .env
-
-# Generate a real signing key (the app refuses to start without one)
+# Generate a signing key and paste it over the SECRET_KEY line in .env:
 python3 -c "import secrets; print('SECRET_KEY=' + secrets.token_urlsafe(64))"
-# ...and paste the result over the SECRET_KEY line in .env
-
 docker compose up --build -d
-```
-
-That one command builds the API image **and the frontend bundle**, starts
-PostgreSQL, waits for it to report healthy, **applies all migrations
-automatically**, starts Uvicorn, and puts Nginx in front to serve the SPA and
-proxy the API.
-
-```bash
 curl http://localhost:8080/health/ready   # {"status":"ready"}
 ```
 
-| URL | What it is |
-| --- | --- |
-| <http://localhost:8080> | The web app (React SPA) — the public entrypoint, use this |
-| <http://localhost:8080/api/v1> | The API, proxied on the same origin |
-| <http://localhost:8080/docs> | Interactive Swagger UI (suppressed when `APP_ENV=production`) |
-| <http://localhost:8080/redoc> | ReDoc reference |
-| <http://localhost:8080/openapi.json> | Machine-readable OpenAPI schema |
-| `localhost:5432` | PostgreSQL |
-
-Everyday commands:
+`docker compose up` builds the images, starts PostgreSQL, **applies migrations
+automatically**, and serves the web app + API behind Nginx at
+<http://localhost:8080> (Swagger at `/docs`). Every setting is read from the
+environment — see `.env.example`; `SECRET_KEY` has no default and the app refuses
+to start without it.
 
 ```bash
-docker compose logs -f api        # Follow application logs
-docker compose ps                 # Health of every service
-docker compose exec -T api pytest # Run the test suite
-docker compose down               # Stop, keeping data
-docker compose down -v            # Stop and destroy the database volume
+docker compose exec -T api pytest   # 130 tests
+docker compose down                 # stop (add -v to wipe the database)
 ```
 
 ---
 
-## Configuration
+## Architecture
 
-Every setting is read from the environment (twelve-factor). The same image runs
-everywhere; only the injected environment differs. `.env.example` is the tracked
-contract; `.env` is git-ignored.
+Nginx serves the SPA and proxies the API on one origin (no CORS) →
+Uvicorn/FastAPI → PostgreSQL. Each backend layer has one job:
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `APP_ENV` | `local` | Environment label. `production` disables `/docs` and `/redoc`. |
-| `LOG_LEVEL` | `info` | Verbosity for the app and Uvicorn. |
-| `SECRET_KEY` | *(none)* | Token signing key. **No default — the app refuses to start without it.** |
-| `JWT_ALGORITHM` | `HS256` | Signing algorithm, pinned at verification time. |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | Access token lifetime. |
-| `POSTGRES_USER` | `lateral` | Database user. |
-| `POSTGRES_PASSWORD` | `lateral` | Database password. **Change outside local dev.** |
-| `POSTGRES_DB` | `lateral` | Database name. |
-| `POSTGRES_HOST` | `db` | Compose service name; use `localhost` on the host. |
-| `POSTGRES_PORT` | `5432` | Database port. |
-| `NGINX_HOST_PORT` | `8080` | Host port for the proxy. |
-| `API_HOST_PORT` | `8000` | Host port for Uvicorn (debugging). |
-| `POSTGRES_HOST_PORT` | `5432` | Host port for PostgreSQL. |
+- **Routers** (`app/api/routes/`) — HTTP in, call a service, return; auth is
+  declared in the signature (`CurrentUser` / `CurrentAdmin`).
+- **Schemas** (`app/schemas/`) — the request/response contracts; omitting price,
+  total and identity makes abuse *unrepresentable*.
+- **Services** (`app/services/`) — own the use case and the transaction, the
+  only layer that commits.
+- **Repositories** (`app/repositories/`) — own the SQL; no HTTP, no rules.
+- **Domain** (`app/domain/`) — pure rules (state machine, roles, errors),
+  imports nothing.
+- **PostgreSQL** — `CHECK`, unique and `RESTRICT` constraints hold even if every
+  layer above is bypassed.
 
-`SECRET_KEY` has no default on purpose: a default would ship to production, where
-anyone who read the repo could forge tokens. Failing to boot is correct.
+Two things a reviewer will look for: **authorisation is a type** — an endpoint
+without a `CurrentAdmin` argument simply cannot be admin-guarded, and OpenAPI
+documents access for free; and services raise **domain errors** that one central
+handler maps to HTTP (`NotFound`→404, `Conflict`→409, `PermissionDenied`→403,
+`InvalidToken`→401), so no service imports `HTTPException`.
 
 ---
 
-## Using the API
+## API
 
-A full session, from empty database to a delivered order. `BASE=http://localhost:8080/api/v1`.
-
-```bash
-# 1. Register (always a customer) and log in (form-encoded, per OAuth2)
-curl -X POST $BASE/auth/register -H 'Content-Type: application/json' \
-  -d '{"email":"ada@example.com","password":"a-sufficiently-long-password","full_name":"Ada Lovelace"}'
-
-TOKEN=$(curl -s -X POST $BASE/auth/login \
-  -d "username=ada@example.com&password=a-sufficiently-long-password" \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
-
-# 2. Promote an admin (operator action — no self-service route by design)
-docker compose exec -T db psql -U lateral -d lateral \
-  -c "UPDATE users SET role='admin' WHERE email='ada@example.com';"
-# ...then re-issue the token, since the role is embedded in it.
-
-# 3. Create a restaurant and a menu item (admin). Prices are integers in cents.
-curl -X POST $BASE/restaurants -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"Trattoria Lateral","description":"Napoli style"}'
-curl -X POST $BASE/restaurants/1/menu -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"Margherita","description":"San Marzano, fior di latte","price_cents":1050}'
-
-# 4. Browse (public)
-curl "$BASE/restaurants?limit=20&offset=0"
-curl $BASE/restaurants/1/menu
-
-# 5. Place an order — no price, no total, no customer id in the request
-curl -X POST $BASE/orders -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"restaurant_id":1,"items":[{"menu_item_id":1,"quantity":2}]}'
-
-# 6. Track it (a customer sees only their own; admins see all)
-curl $BASE/orders/1 -H "Authorization: Bearer $TOKEN"
-
-# 7. Advance it (admin). Skipping a step returns 409 with the allowed transitions.
-curl -X PATCH $BASE/orders/1/status -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"status":"accepted"}'
-```
-
-The order response carries the server-computed `total_cents` and the snapshotted
-item names — the basket says *what* to buy; the server decides what it costs and
-who is buying.
-
----
-
-## API reference
-
-All endpoints are under `/api/v1`. Authentication is `Authorization: Bearer <token>`.
+All endpoints are under `/api/v1`; auth is `Authorization: Bearer <token>`. Login
+is form-encoded (OAuth2 password flow). Registration always creates a customer;
+the first admin is promoted out-of-band
+(`UPDATE users SET role='admin' WHERE email=…`).
 
 | Method | Path | Access | Description |
 | --- | --- | --- | --- |
-| `POST` | `/auth/register` | Public | Create a customer account. Returns 201. |
-| `POST` | `/auth/login` | Public | Exchange credentials for a token (form-encoded). |
-| `GET` | `/auth/me` | Authenticated | The current user's profile. |
-| `GET` | `/restaurants` | Public | Paginated list of active restaurants. |
-| `GET` | `/restaurants/{id}` | Public | A single restaurant. |
-| `GET` | `/restaurants/{id}/menu` | Public | Available items. Staff may pass `?include_unavailable=true`. |
-| `POST` | `/restaurants` | **Admin** | Create a restaurant. |
-| `PATCH` | `/restaurants/{id}` | **Admin** | Partial update, including deactivation. |
-| `POST` | `/restaurants/{id}/menu` | **Admin** | Add a menu item. |
-| `PATCH` | `/menu-items/{id}` | **Admin** | Partial update, including availability. |
-| `DELETE` | `/menu-items/{id}` | **Admin** | Remove a menu item. Returns 204. |
-| `POST` | `/orders` | Authenticated | Place an order. Returns 201. |
-| `GET` | `/orders` | Authenticated | Own orders; **all** for admins. Supports `?status=`, `?limit=`, `?offset=`. |
-| `GET` | `/orders/{id}` | Owner or admin | Track a single order. |
+| `POST` | `/auth/register` | Public | Create a customer account (201). |
+| `POST` | `/auth/login` | Public | Exchange credentials for a token. |
+| `GET` | `/auth/me` | Authenticated | Current user. |
+| `GET` | `/restaurants` · `/restaurants/{id}` · `/restaurants/{id}/menu` | Public | Browse the catalogue. |
+| `POST`/`PATCH` | `/restaurants`, `/restaurants/{id}`, `/restaurants/{id}/menu` | **Admin** | Manage restaurants and menus. |
+| `PATCH`/`DELETE` | `/menu-items/{id}` | **Admin** | Update or remove a menu item. |
+| `POST` | `/orders` | Authenticated | Place an order (201) — no price in the body. |
+| `GET` | `/orders` · `/orders/{id}` | Auth (own; **all** for admin) | Track orders. Supports `?status=`. |
 | `PATCH` | `/orders/{id}/status` | **Admin** | Advance the lifecycle. |
-| `GET` | `/health/live` | Public | Liveness — answers "is the process up". |
-| `GET` | `/health/ready` | Public | Readiness — runs `SELECT 1`; 503 if the DB is unreachable. |
+| `GET` | `/health/live` · `/health/ready` | Public | Liveness / readiness (`SELECT 1`). |
 
-Health probes sit at the root, outside `/api/v1`: an orchestrator is not an API
-consumer, so its probe URL should never change when the API reaches v2.
-
-**Status codes:** `401` bad/missing token · `403` authenticated but wrong role ·
-`404` doesn't exist *or* is none of your business · `409` conflicts with current
-state · `422` malformed per the schema. (`422` could never be valid; `409` would
-have succeeded at a different moment.)
+Status codes: `401` bad/missing token · `403` wrong role · `404` absent *or* not
+yours · `409` conflicts with current state · `422` malformed.
 
 ---
 
-## Frontend (web app)
+## Frontend (bonus)
 
-A **React + TypeScript** single-page app (Vite), in `frontend/`. It is the
-customer- and staff-facing surface for exactly the API above — the demo GIF at
-the top of this README is this app, not a mockup.
-
-**One origin, no CORS.** Nginx serves the compiled bundle *and* proxies the API,
-so every request the browser makes is same-origin and relative (`/api/v1/...`).
-There is no CORS configuration anywhere: in development, Vite proxies the same
-paths to the stack. This is a deliberate simplification over hosting the SPA on
-a separate origin and maintaining an allow-list.
-
-**The backend's principles carried to the client:**
-
-- **The client states intent; the server decides.** The basket sends only
-  `menu_item_id` and `quantity` — never a price. The order total shown after
-  placement is whatever the server computed and snapshotted.
-- **Authorisation shapes the UI, not just the routes.** The current user comes
-  from `/auth/me` (loaded, not decoded from the token); admin-only controls —
-  advancing an order, catalogue management — render only for `role === "admin"`,
-  and the API enforces the same rule regardless.
-- **The lifecycle is mirrored, not reinvented.** `ALLOWED_TRANSITIONS` in
-  `frontend/src/api/types.ts` mirrors the domain table, so the order view offers
-  only legal next steps; the state machine remains the source of truth.
-- **Live tracking.** The order page polls until the order reaches a terminal
-  state; the staff order list polls while open.
-
-| Piece | File |
-| --- | --- |
-| Typed API client (bearer token, `ApiError`, form-vs-JSON) | `frontend/src/api/client.ts` |
-| Wire types mirroring the schemas | `frontend/src/api/types.ts` |
-| Auth state (token in `localStorage`, current user) | `frontend/src/auth/AuthContext.tsx` |
-| Pages: browse, menu/basket, orders, tracking, admin | `frontend/src/pages/` |
-
-**Local development** (fast loop, with the backend stack already up):
+A React + TypeScript SPA (Vite) in `frontend/`, served by the same Nginx that
+proxies the API — one origin, no CORS. It is the surface for the API above (the
+demo GIF is this app). Browse → order → **live tracking**; admin can manage the
+catalogue and advance orders, with those controls gated on role. The client
+sends only `menu_item_id` + `quantity`, so the server stays the sole authority on
+price and total, and `ALLOWED_TRANSITIONS` mirrors the domain machine so the UI
+offers only legal next steps.
 
 ```bash
-cd frontend
-npm install
-npm run dev        # Vite dev server on http://localhost:5173, proxying the API
-npm run build      # tsc typecheck + production bundle (what the image ships)
+cd frontend && npm install && npm run dev   # Vite dev server, proxying the API
 ```
 
-The production build is compiled inside `docker/frontend/Dockerfile` (a Node
-stage) and the static output is copied into the Nginx image — no Node or source
-reaches the runtime image.
+The production build is compiled in `docker/frontend/Dockerfile` and copied into
+the Nginx image as static assets.
 
 ---
 
-## The order lifecycle
+## Order lifecycle
 
 ```
-        ┌─────────┐      ┌──────────┐      ┌──────────────────┐      ┌───────────┐
-        │ pending │─────▶│ accepted │─────▶│ out_for_delivery │─────▶│ delivered │
-        └────┬────┘      └────┬─────┘      └──────────────────┘      └───────────┘
-             │                │                                        (terminal)
-             └────────┬───────┘
-                      ▼
-                ┌───────────┐
-                │ cancelled │  (terminal)
-                └───────────┘
+pending ──▶ accepted ──▶ out_for_delivery ──▶ delivered
+   │           │
+   └───────────┴──▶ cancelled            (delivered / cancelled are terminal)
 ```
 
-The lifecycle lives in `app/domain/order_state.py` as a **declarative transition
-table**, not scattered `if` statements. Adding a status means adding a row:
-
-```python
-ALLOWED_TRANSITIONS: dict[OrderStatus, frozenset[OrderStatus]] = {
-    OrderStatus.PENDING:          frozenset({OrderStatus.ACCEPTED, OrderStatus.CANCELLED}),
-    OrderStatus.ACCEPTED:         frozenset({OrderStatus.OUT_FOR_DELIVERY, OrderStatus.CANCELLED}),
-    OrderStatus.OUT_FOR_DELIVERY: frozenset({OrderStatus.DELIVERED}),
-    OrderStatus.DELIVERED:        frozenset(),
-    OrderStatus.CANCELLED:        frozenset(),
-}
-```
-
-Four properties are enforced and tested: **no skipping** (`pending → delivered`
-is rejected), **no going backwards**, **terminal states are final**, and **no
-self-transitions** (re-setting a status is a `409`, which surfaces a lost update
-rather than hiding it). `cancelled` is possible before dispatch only; afterwards
-the resolution is a refund, not a status change.
-
-Transitions take a `SELECT ... FOR UPDATE` row lock, so two staff acting at once
-can't both read the old status and both write — one update silently lost.
+A declarative transition table in `app/domain/order_state.py` — adding a status
+is adding a row. Enforced and tested: no skipping, no going backwards, terminal
+states are final, and no self-transitions (a repeat is a `409`, surfacing lost
+updates instead of hiding them). Transitions take a `SELECT … FOR UPDATE` lock;
+`cancelled` is reachable only before dispatch.
 
 ---
 
-## Data model
+## Data & money
 
-```
-users                     restaurants
-  id                        id
-  email          (unique)   name
-  hashed_password           description
-  full_name                 is_active
-  role  (enum)                 │
-  is_active                    │ 1:N (cascade)
-     │                         ▼
-     │                      menu_items
-     │ 1:N                    id
-     │                        restaurant_id
-     ▼                        name
-  orders  ◀───── N:1 ─────    price_cents  (CHECK >= 0)
-     id                       is_available
-     customer_id  (RESTRICT)
-     restaurant_id (RESTRICT)
-     status  (enum, indexed)
-     total_cents  (CHECK >= 0)
-        │
-        │ 1:N (cascade)
-        ▼
-  order_items
-     id
-     order_id       (CASCADE)
-     menu_item_id   (RESTRICT)
-     item_name          ◀── snapshot
-     unit_price_cents   ◀── snapshot
-     quantity  (CHECK > 0)
-```
-
-**Price and name are snapshotted** onto `order_items` as copies, not a live join
-— the difference between a receipt and a query. Raising a price tomorrow must not
-retroactively change what past customers paid. A test proves it: place an order,
-change the menu price, re-fetch — the order still reports its original value.
-
-**Deletions are chosen per relationship.** `orders → order_items` and
-`restaurants → menu_items` **CASCADE** (parts have no meaning without their
-parent). Financial links (`orders → users/restaurants`, `order_items →
-menu_items`) **RESTRICT** — retire a restaurant with `is_active = false`, not a
-delete. `CHECK` constraints and the unique email index are the last line of
-defence, holding against psql sessions and future code, not just this app.
+Orders **snapshot** `item_name` and `unit_price_cents` onto `order_items` — a
+receipt, not a live join — so later menu edits never rewrite history (a test
+proves it). Money is integer **cents** end to end, since binary floats can't
+represent `10.50`. Financial links (`orders → users/restaurants`, `order_items →
+menu_items`) use `RESTRICT`; menus and order lines `CASCADE`. Retire a restaurant
+with `is_active = false`, not a delete.
 
 ---
 
 ## Security
 
-- **Passwords** hashed with **Argon2id** (`argon2-cffi` directly, not the
-  unmaintained `passlib`) — memory-hard, the current OWASP first choice.
-- **Tokens** are HS256 JWTs (PyJWT). The verifier **pins the algorithm** rather
-  than trusting the token header (defence against `alg: none` and RS256→HS256
-  confusion). `exp`, `iat` and `sub` are all required.
-- **Auth failures are indistinguishable.** Unknown email, wrong password and
-  deactivated account return one identical response; a dummy hash keeps timing
-  constant — no account-enumeration oracle.
-- **Roles are never client-supplied.** `register` has no `role` field; the role
-  is server-issued, signed, and verified on every privileged route.
-- **The user row is loaded on every request**, so deactivation takes effect
-  immediately instead of when the last token expires.
-- **Secrets stay out of logs** via `SecretStr` (enforced by a test that caught a
-  real leak when `database_url` was a `computed_field`).
-- **The proxy** disables `server_tokens`, caps bodies at 1 MB, and sets
-  `X-Content-Type-Options`, `X-Frame-Options` and `Referrer-Policy`. The
-  **container** runs as a non-root user with no shell.
+- Passwords hashed with **Argon2id** (`argon2-cffi`).
+- **HS256 JWTs** with the algorithm pinned at verification; `exp`/`iat`/`sub`
+  required.
+- Auth failures are indistinguishable (constant-time dummy hash) — no account
+  enumeration.
+- Roles are never client-supplied; the user row is loaded per request, so
+  deactivation is immediate.
+- Secrets are `SecretStr`; Nginx hides its version, caps bodies at 1 MB and sets
+  security headers; the container runs as a non-root user.
 
 ---
 
-## Testing
+## Testing & migrations
+
+**130 tests** run against **real PostgreSQL** — the test schema is built *by the
+migrations* (a broken migration fails the suite before a deploy), and each test
+runs in a transaction that is rolled back. Written test-first. The schema is only
+ever changed by Alembic migrations, which run automatically on container start;
+`alembic check` catches model/migration drift.
 
 ```bash
-docker compose exec -T api pytest                          # everything (130 tests)
-docker compose exec -T api pytest --cov=app --cov-report=term-missing
-docker compose exec -T api pytest tests/api/test_orders.py -v
-```
-
-Tests run against **real PostgreSQL** (a separate `lateral_test` database, built
-**by running the migrations** — so a broken migration fails the suite before it
-fails a deploy). Each test runs inside a transaction that is always rolled back
-(`join_transaction_mode="create_savepoint"`), so tests are isolated and
-order-independent without truncating tables.
-
-The suite is written **test-first**, and docstrings explain the commercial
-reasoning (e.g. `test_the_total_is_computed_by_the_server`,
-`test_nothing_is_persisted_when_one_line_is_invalid`).
-
-| Suite | Focus |
-| --- | --- |
-| `tests/domain/test_order_state.py` | The state machine, every pair of statuses. |
-| `tests/core/test_security.py` | Hashing, token issue/verify, tampering, expiry, redaction. |
-| `tests/models/test_schema_integrity.py` | Constraints, cascades, uniqueness against the real DB. |
-| `tests/api/test_auth.py` | Registration, login, enumeration resistance, privilege escalation. |
-| `tests/api/test_restaurants.py` | Catalogue reads and admin-only writes. |
-| `tests/api/test_orders.py` | Placement, pricing, atomicity, ownership, lifecycle. |
-| `tests/test_health.py` | Liveness and readiness, incl. a simulated DB outage. |
-
----
-
-## Database migrations
-
-The schema is **only ever** changed by a migration; `create_all()` is never
-called, in any environment. Migrations run **automatically on container start**,
-before Uvicorn, so an unmigrated database is impossible.
-
-```bash
-docker compose exec -T api alembic revision --autogenerate -m "add delivery notes"  # then READ it
-docker compose exec -T api alembic upgrade head
-docker compose exec -T api alembic downgrade -1
-docker compose exec -T api alembic check      # fail if models and migrations drifted — CI-ready
-```
-
-Autogenerate is a first draft: the initial migration was hand-audited because
-`drop_table` leaves PostgreSQL `ENUM` types behind, breaking the next upgrade.
-`alembic.ini` holds **no database URL** — it's resolved from `Settings` at
-runtime, so credentials never enter a tracked file.
-
----
-
-## Development workflow
-
-The source tree is bind-mounted into the API container, so edits take effect on
-save. All five checks must be clean before a branch merges:
-
-```bash
-docker compose exec -T api ruff check .    # Lint (100-char lines, broad rule set)
-docker compose exec -T api ruff format .   # Format
-docker compose exec -T api mypy app        # Type-check (strict-adjacent, no stray Any)
-docker compose exec -T api pytest          # Test
-docker compose exec -T api alembic check   # Migration drift
-```
-
-Work happens on feature branches merged via PRs with `--no-ff`. Commit messages
-explain **why** a change is correct; PR descriptions carry the architectural
-argument.
-
----
-
-## Project layout
-
-```
-app/
-  api/          # deps (session, current user, role guards), errors (domain→HTTP),
-                # router, routes/ (health, auth, restaurants, menu_items, orders)
-  core/         # config (Settings, SecretStr), security (Argon2id, JWT)
-  db/           # DeclarativeBase + naming convention, engine/session
-  domain/       # Pure rules: errors, order_state, roles. Imports nothing.
-  models/       # SQLAlchemy mappings
-  repositories/ # Query objects. No HTTP, no business rules.
-  schemas/      # Pydantic request/response contracts
-  services/     # Use cases. The only layer that commits.
-  main.py       # create_app()
-frontend/       # React + TypeScript SPA (Vite)
-  src/api/      # Typed client + wire types mirroring the schemas
-  src/auth/     # Auth context (token, current user)
-  src/pages/    # Browse, menu/basket, orders, tracking, admin
-docker/         # api/{Dockerfile,entrypoint.sh}, frontend/Dockerfile, nginx/default.conf
-migrations/     # Alembic
-tests/          # conftest, factories, and the suites
-docker-compose.yml · pyproject.toml · requirements.txt · .env.example
+docker compose exec -T api ruff check . && \
+docker compose exec -T api mypy app && \
+docker compose exec -T api pytest && \
+docker compose exec -T api alembic check
 ```
 
 ---
 
-## Decisions worth explaining
+## Layout
 
-- **Synchronous SQLAlchemy, not async** — the workload is ordinary CRUD bounded
-  by the connection pool, not the event loop. FastAPI runs sync endpoints in a
-  thread pool; only the repository layer would change if profiling disagreed.
-- **Integer cents, never floats** — binary floats can't represent `10.50`; the
-  unit lives in the column name so it can't be misread.
-- **404 rather than 403 for another customer's order** — a 403 would confirm the
-  order exists, turning sequential IDs into a way to measure order volume.
+```
+app/       api · core · db · domain · models · repositories · schemas · services · main.py
+frontend/  src/{api,auth,components,pages} — React + TypeScript SPA (Vite)
+docker/    api/{Dockerfile,entrypoint.sh} · frontend/Dockerfile · nginx/default.conf
+migrations/ · tests/ · docker-compose.yml · pyproject.toml · .env.example
+```
 
 ---
-
-## Author
 
 **Alghisi Alessandro Paolo** — <alexalghisi@gmail.com> ·
-<https://github.com/alexalghisi>
-
-Built as a technical challenge submission — FastAPI, PostgreSQL, SQLAlchemy,
-Alembic, Docker and Nginx, developed test-first.
+<https://github.com/alexalghisi> · a technical-challenge submission built
+test-first with FastAPI, PostgreSQL, SQLAlchemy, Alembic, React, Docker and
+Nginx.
