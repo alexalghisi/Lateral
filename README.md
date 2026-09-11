@@ -1,6 +1,6 @@
 # Lateral
 
-A backend for a small takeaway platform. Customers browse restaurants and menus,
+A small takeaway platform, full stack. Customers browse restaurants and menus,
 place orders, and track them through their lifecycle. Internal staff manage the
 catalogue and drive orders from `pending` to `delivered`.
 
@@ -8,8 +8,10 @@ catalogue and drive orders from `pending` to `delivered`.
   <img src="docs/assets/how-it-works.gif" width="960" alt="A customer browses Trattoria Lateral, orders two Margheritas, and tracks the order from pending to delivered. The matching API calls appear beside the phone." />
 </p>
 
-Built with FastAPI, PostgreSQL, SQLAlchemy and Alembic, packaged with Docker
-Compose behind Nginx.
+A **FastAPI + PostgreSQL** backend (SQLAlchemy, Alembic) and a **React +
+TypeScript** frontend (Vite), served together behind Nginx on one origin and
+packaged with Docker Compose. `docker compose up` builds and runs the whole
+thing.
 
 **Author:** Alghisi Alessandro Paolo — <alexalghisi@gmail.com>
 
@@ -17,8 +19,10 @@ Compose behind Nginx.
 
 ## How it works
 
-A customer's request hits **Nginx** (the only public entrypoint), which forwards
-to **Uvicorn** running the **FastAPI** app. Each layer has one job:
+The **React SPA** and the **API** answer on one origin behind **Nginx** (the
+only public entrypoint): Nginx serves the compiled frontend and forwards API
+calls to **Uvicorn** running the **FastAPI** app. On the backend, each layer has
+one job:
 
 | Layer | Responsibility |
 | --- | --- |
@@ -75,9 +79,10 @@ python3 -c "import secrets; print('SECRET_KEY=' + secrets.token_urlsafe(64))"
 docker compose up --build -d
 ```
 
-That one command builds the image, starts PostgreSQL, waits for it to report
-healthy, **applies all migrations automatically**, starts Uvicorn and puts Nginx
-in front of it.
+That one command builds the API image **and the frontend bundle**, starts
+PostgreSQL, waits for it to report healthy, **applies all migrations
+automatically**, starts Uvicorn, and puts Nginx in front to serve the SPA and
+proxy the API.
 
 ```bash
 curl http://localhost:8080/health/ready   # {"status":"ready"}
@@ -85,7 +90,8 @@ curl http://localhost:8080/health/ready   # {"status":"ready"}
 
 | URL | What it is |
 | --- | --- |
-| <http://localhost:8080> | Nginx — the public entrypoint, use this |
+| <http://localhost:8080> | The web app (React SPA) — the public entrypoint, use this |
+| <http://localhost:8080/api/v1> | The API, proxied on the same origin |
 | <http://localhost:8080/docs> | Interactive Swagger UI (suppressed when `APP_ENV=production`) |
 | <http://localhost:8080/redoc> | ReDoc reference |
 | <http://localhost:8080/openapi.json> | Machine-readable OpenAPI schema |
@@ -207,6 +213,55 @@ consumer, so its probe URL should never change when the API reaches v2.
 `404` doesn't exist *or* is none of your business · `409` conflicts with current
 state · `422` malformed per the schema. (`422` could never be valid; `409` would
 have succeeded at a different moment.)
+
+---
+
+## Frontend (web app)
+
+A **React + TypeScript** single-page app (Vite), in `frontend/`. It is the
+customer- and staff-facing surface for exactly the API above — the demo GIF at
+the top of this README is this app, not a mockup.
+
+**One origin, no CORS.** Nginx serves the compiled bundle *and* proxies the API,
+so every request the browser makes is same-origin and relative (`/api/v1/...`).
+There is no CORS configuration anywhere: in development, Vite proxies the same
+paths to the stack. This is a deliberate simplification over hosting the SPA on
+a separate origin and maintaining an allow-list.
+
+**The backend's principles carried to the client:**
+
+- **The client states intent; the server decides.** The basket sends only
+  `menu_item_id` and `quantity` — never a price. The order total shown after
+  placement is whatever the server computed and snapshotted.
+- **Authorisation shapes the UI, not just the routes.** The current user comes
+  from `/auth/me` (loaded, not decoded from the token); admin-only controls —
+  advancing an order, catalogue management — render only for `role === "admin"`,
+  and the API enforces the same rule regardless.
+- **The lifecycle is mirrored, not reinvented.** `ALLOWED_TRANSITIONS` in
+  `frontend/src/api/types.ts` mirrors the domain table, so the order view offers
+  only legal next steps; the state machine remains the source of truth.
+- **Live tracking.** The order page polls until the order reaches a terminal
+  state; the staff order list polls while open.
+
+| Piece | File |
+| --- | --- |
+| Typed API client (bearer token, `ApiError`, form-vs-JSON) | `frontend/src/api/client.ts` |
+| Wire types mirroring the schemas | `frontend/src/api/types.ts` |
+| Auth state (token in `localStorage`, current user) | `frontend/src/auth/AuthContext.tsx` |
+| Pages: browse, menu/basket, orders, tracking, admin | `frontend/src/pages/` |
+
+**Local development** (fast loop, with the backend stack already up):
+
+```bash
+cd frontend
+npm install
+npm run dev        # Vite dev server on http://localhost:5173, proxying the API
+npm run build      # tsc typecheck + production bundle (what the image ships)
+```
+
+The production build is compiled inside `docker/frontend/Dockerfile` (a Node
+stage) and the static output is copied into the Nginx image — no Node or source
+reaches the runtime image.
 
 ---
 
@@ -400,7 +455,11 @@ app/
   schemas/      # Pydantic request/response contracts
   services/     # Use cases. The only layer that commits.
   main.py       # create_app()
-docker/         # api/{Dockerfile,entrypoint.sh}, nginx/default.conf
+frontend/       # React + TypeScript SPA (Vite)
+  src/api/      # Typed client + wire types mirroring the schemas
+  src/auth/     # Auth context (token, current user)
+  src/pages/    # Browse, menu/basket, orders, tracking, admin
+docker/         # api/{Dockerfile,entrypoint.sh}, frontend/Dockerfile, nginx/default.conf
 migrations/     # Alembic
 tests/          # conftest, factories, and the suites
 docker-compose.yml · pyproject.toml · requirements.txt · .env.example
