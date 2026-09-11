@@ -4,6 +4,10 @@ A backend for a small takeaway platform. Customers browse restaurants and menus,
 place orders, and track them through their lifecycle. Internal staff manage the
 catalogue and drive orders from `pending` to `delivered`.
 
+<p align="center">
+  <img src="docs/assets/how-it-works.gif" width="960" alt="A customer browses Trattoria Lateral, orders two Margheritas, and tracks the order from pending to delivered. The matching API calls appear beside the phone." />
+</p>
+
 Built with FastAPI, PostgreSQL, SQLAlchemy and Alembic, packaged with Docker
 Compose behind Nginx.
 
@@ -43,6 +47,52 @@ The service asks a **repository** to run the SQL and consults the pure **domain*
 for any rule that must hold regardless of HTTP or SQL. The repository talks to
 **PostgreSQL**. **Schemas** shape the request on the way in and the response on
 the way out. Nothing durable is written until the service says `commit`, once.
+
+### The crucial path, at a glance
+
+One customer's order, from placing it to a courier being dispatched — every hop
+it makes through the layers. This is the whole app in a single picture:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor C as Customer
+    participant N as Nginx
+    participant R as Router (FastAPI)
+    participant S as Order service
+    participant D as Domain (state machine)
+    participant Repo as Repository
+    participant DB as PostgreSQL
+
+    Note over C,DB: Place an order — client says WHAT to buy, server decides the PRICE
+    C->>N: POST /orders {items:[{item:1, qty:2}]} + Bearer token
+    N->>R: forward (banner hidden, body ≤ 1 MB)
+    R->>R: validate schema · resolve CurrentUser from token
+    R->>S: place_order(user, basket)
+    S->>Repo: load live menu items
+    Repo->>DB: SELECT ... (prices, availability)
+    DB-->>Repo: rows
+    S->>S: price server-side · snapshot name + unit price
+    S->>Repo: insert order + lines
+    Repo->>DB: INSERT ...
+    S->>DB: COMMIT (once — all lines or nothing)
+    S-->>R: order {status: pending, total_cents: 2100}
+    R-->>C: 201 Created
+
+    Note over C,DB: Advance the lifecycle — admin only, guarded by the state machine
+    C->>N: PATCH /orders/1/status {status: accepted}
+    N->>R: forward
+    R->>R: require CurrentAdmin
+    R->>S: set_status(order_id, accepted)
+    S->>Repo: SELECT ... FOR UPDATE (lock the row)
+    Repo->>DB: lock + read current status
+    S->>D: is pending → accepted allowed?
+    D-->>S: yes
+    S->>DB: UPDATE status · COMMIT
+    S-->>R: order {status: accepted}
+    R-->>C: 200 OK
+    Note right of D: An illegal jump (e.g. pending → delivered)<br/>never reaches the DB — 409 Conflict
+```
 
 ### Follow one request: placing an order
 
