@@ -13,12 +13,12 @@ Compose behind Nginx.
 
 ## Table of contents
 
-1. [Quick start](#quick-start)
-2. [Configuration](#configuration)
-3. [Using the API](#using-the-api)
-4. [API reference](#api-reference)
-5. [The order lifecycle](#the-order-lifecycle)
-6. [Architecture](#architecture)
+1. [How it works (start here)](#how-it-works-start-here)
+2. [Quick start](#quick-start)
+3. [Configuration](#configuration)
+4. [Using the API](#using-the-api)
+5. [API reference](#api-reference)
+6. [The order lifecycle](#the-order-lifecycle)
 7. [Data model](#data-model)
 8. [Security](#security)
 9. [Testing](#testing)
@@ -26,6 +26,98 @@ Compose behind Nginx.
 11. [Development workflow](#development-workflow)
 12. [Project layout](#project-layout)
 13. [Decisions worth explaining](#decisions-worth-explaining)
+
+---
+
+## How it works (start here)
+
+The guided read for a reviewer: what each part is, who it talks to, and why. The
+rest of the document is reference — this is the tour.
+
+### In one breath
+
+A customer's app sends HTTP to **Nginx**, which forwards to **Uvicorn** running
+the **FastAPI** app. A **router** translates HTTP into a call and hands off to a
+**service**, which owns the business decision and the one database transaction.
+The service asks a **repository** to run the SQL and consults the pure **domain**
+for any rule that must hold regardless of HTTP or SQL. The repository talks to
+**PostgreSQL**. **Schemas** shape the request on the way in and the response on
+the way out. Nothing durable is written until the service says `commit`, once.
+
+### Follow one request: placing an order
+
+`POST /api/v1/orders  {"restaurant_id": 1, "items": [{"menu_item_id": 1, "quantity": 2}]}`
+
+1. **Nginx** — the only thing exposed to the internet. Hides its banner, caps
+   bodies at 1 MB, adds hardening headers, forwards inward to Uvicorn.
+2. **Router** (`app/api/routes/orders.py`) — matches the path; its whole body is
+   "read input, call the service, return the result". It declares `CurrentUser`
+   in its signature, which *is* the auth check and documents itself in OpenAPI.
+3. **Schema** (`app/schemas/order.py`) — already validated the body, which has no
+   price, no total, no `customer_id`: the client says *what* to buy, never what
+   to pay or who they are, so buying a pizza for one cent is unrepresentable.
+4. **Service** (`app/services/order.py`) — reads the live menu, computes the
+   price server-side, snapshots each name and price, and inserts the order and
+   its lines as one unit, committing **once**. A basket with a sold-out line
+   writes nothing — never a half-order.
+5. **Repository** (`app/repositories/order.py`) — owns the SQL; filters lists by
+   owner so orders can't leak, and locks the row with `SELECT ... FOR UPDATE` on
+   a status change. It has never heard of HTTP.
+6. **Domain** (`app/domain/`) — the rulebook (state machine, roles, errors). Pure
+   Python that imports nothing, so it's testable without a database or server and
+   can't decay into framework details.
+7. **PostgreSQL** — source of truth and last defence: `CHECK` constraints, the
+   unique email index and `RESTRICT` keys refuse bad data even if every layer
+   above were bypassed.
+
+The reply retraces the path, shaped by a response schema carrying the
+server-computed `total_cents` and the snapshotted item names.
+
+### Who talks to whom, and why
+
+| Component | Talks to | Why this is the right shape |
+| --- | --- | --- |
+| **Nginx** | Internet ⇄ Uvicorn | One hardened front door, so the app never faces the raw internet. |
+| **Uvicorn** | Nginx ⇄ FastAPI | Runs the app; multi-process via `--workers`, no Gunicorn layer to keep in sync. |
+| **Routers** | Schemas + Services | HTTP in, call out — zero logic, so access rules are auditable from the signature. |
+| **Schemas** | FastAPI + Routers | The contract in/out; omitting price/total/identity makes abuse *unrepresentable*. |
+| **Services** | Repositories + Domain | Own the use case and transaction; the only layer that commits. |
+| **Repositories** | Services + PostgreSQL | Own the queries; keeps SQL out of logic and from drifting across services. |
+| **Domain** | Consulted by Services | Delivery-agnostic rules; imports nothing, so it's testable in isolation. |
+| **PostgreSQL** | Repositories | Source of truth; constraints hold against psql and future code, not just this app. |
+| **Alembic** | DB, at startup | The only way the schema changes; runs before Uvicorn, so an unmigrated DB can't exist. |
+
+### Two mechanisms a reviewer will look for
+
+**Authorisation is a type.** Role guards ride in the signature, so an endpoint
+that lacks one simply has no admin argument — and OpenAPI documents access for
+free:
+
+```python
+DbSession    = Annotated[Session, Depends(get_db)]
+CurrentUser  = Annotated[User,    Depends(get_current_user)]
+CurrentAdmin = Annotated[User,    Depends(require_role(UserRole.ADMIN))]
+```
+
+**Errors carry meaning; the edge maps it to a status.** Services raise domain
+exceptions and never import `HTTPException`, so the mapping lives in one place:
+
+| Domain exception | HTTP |
+| --- | --- |
+| `NotFoundError` | 404 |
+| `ConflictError` (incl. `InvalidOrderTransition`) | 409 |
+| `PermissionDeniedError` | 403 |
+| `InvalidTokenError` | 401 + `WWW-Authenticate: Bearer` |
+
+### Three ideas worth remembering
+
+- **Client states intent, server decides consequence** — price, total and
+  identity come from the menu and the token, enforced by the *shape* of the
+  schemas rather than by checks that could be forgotten.
+- **One layer commits** — repositories `flush`, only services `commit`, once per
+  use case, so order placement is all-or-nothing.
+- **Rules are pure data** — the lifecycle is a transition table in an import-free
+  domain, provable without a database or a web server.
 
 ---
 
@@ -367,87 +459,6 @@ that never happened.
 
 ---
 
-## Architecture
-
-### Layers
-
-```
-  HTTP  ──▶  Routers  ──▶  Services  ──▶  Repositories  ──▶  PostgreSQL
-             (app/api)     (app/services)  (app/repositories)
-                  │             │
-                  └─── Schemas ─┘         Domain (app/domain)
-                     (app/schemas)        pure rules, zero imports
-```
-
-Each layer has exactly one reason to change, and the dependencies point in one
-direction only:
-
-- **Routers** translate HTTP to calls and back. They contain no business logic;
-  their longest statements are the dependency declarations that enforce roles.
-- **Services** own the use cases and the transaction boundary. They are the only
-  layer that calls `commit()`.
-- **Repositories** own the queries. They know SQLAlchemy and nothing about HTTP.
-- **Domain** holds rules that are true regardless of delivery mechanism — the
-  state machine, roles, error taxonomy. It imports **nothing** from the rest of
-  the application: not FastAPI, not SQLAlchemy, not Pydantic models.
-
-The domain's total absence of imports is the architectural keystone. It means the
-state machine can be tested without a database, a web server, or a single
-fixture, and it means the business rules cannot rot into framework details.
-
-### Transaction boundaries
-
-Exactly one layer commits: the service. Repositories `flush()` — making rows
-visible to subsequent queries within the transaction, and letting the database
-assign identifiers — but never commit. Routers and dependencies never commit
-either.
-
-A repository that committed would make it impossible to compose two writes into
-one atomic operation. Order placement is precisely that composition: validate
-every line against the live menu, snapshot prices, insert the order and all its
-lines, and commit **once**. A basket containing a sold-out item therefore leaves
-nothing behind — not a partial order containing whatever happened to be in
-stock, which would charge a customer for half of what they asked for and give
-them no way to find out until it arrived.
-
-### Dependency injection
-
-FastAPI's `Depends` is used as the composition root, with `Annotated` aliases
-that keep signatures readable:
-
-```python
-DbSession    = Annotated[Session, Depends(get_db)]
-CurrentUser  = Annotated[User,    Depends(get_current_user)]
-CurrentAdmin = Annotated[User,    Depends(require_role(UserRole.ADMIN))]
-```
-
-`CurrentAdmin` reads as a sentence and is impossible to forget silently — an
-endpoint without it simply has no admin argument. Authorisation being part of the
-signature rather than a line inside the body means the OpenAPI schema documents
-it automatically, and a reviewer can audit an entire router's access rules by
-reading only the parameter lists.
-
-Because the database session arrives through a dependency, tests swap it for one
-bound to a transaction that is always rolled back — no mocking, no monkey
-patching, just a different provider.
-
-### Errors
-
-Domain errors carry meaning; the API layer maps meaning to status codes:
-
-| Domain exception | HTTP |
-| --- | --- |
-| `NotFoundError` | 404 |
-| `ConflictError` (incl. `InvalidOrderTransition`) | 409 |
-| `PermissionDeniedError` | 403 |
-| `InvalidTokenError` | 401 + `WWW-Authenticate: Bearer` |
-
-Services raise business exceptions and never import `HTTPException`. Services
-remain reusable outside HTTP, the mapping is defined in exactly one place, and no
-endpoint can accidentally report a conflict as a 500.
-
----
-
 ## Data model
 
 ```
@@ -737,11 +748,6 @@ FastAPI runs synchronous endpoints in a thread pool, which handles this load
 comfortably. If profiling ever shows otherwise, the repository layer is the only
 thing that would change.
 
-**No Gunicorn.** The brief suggests Uvicorn *or* Gunicorn. Modern Uvicorn removed
-`uvicorn.workers.UvicornWorker`, so the once-standard pairing no longer exists as
-written. `uvicorn --workers N` provides the same multi-process model with one
-fewer dependency and one fewer layer of configuration.
-
 **Integer cents, never floats.** Binary floating point cannot represent `10.50`
 exactly. Money that drifts by fractions of a cent through arithmetic is the
 oldest bug in commercial software. The unit lives in the column name so it cannot
@@ -751,20 +757,6 @@ be misread.
 exists, which turns sequential identifiers into a way to measure the platform's
 order volume. To a customer, someone else's order and a nonexistent one are the
 same thing.
-
-**One list endpoint for both audiences.** `GET /orders` serves customers and
-staff, with the service deciding scope. Two endpoints would duplicate pagination,
-filtering and serialisation to express a difference of one predicate — and would
-be two places to forget the customer filter.
-
-**No Makefile.** The project standard forbids tabs, and `make` requires literal
-tab-indented recipes. Rather than carve out an exception, the commands are
-documented here.
-
-**Suppressed documentation in production.** `/docs` and `/redoc` disappear when
-`APP_ENV=production`. A complete map of every endpoint and payload shape is
-useful to a developer and equally useful to an attacker; the OpenAPI schema is
-better distributed to the people who should have it.
 
 ---
 
