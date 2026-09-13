@@ -12,10 +12,7 @@ const queryClient = new QueryClient({
   },
 });
 
-const root = document.getElementById("root");
-if (!root) throw new Error("Missing #root element");
-
-createRoot(root).render(
+createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
