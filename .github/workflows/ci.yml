@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# A new push to the same branch makes the previous run irrelevant. Cancelling it
+# frees a runner instead of burning minutes on a diff nobody will read.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+
+    # The suite runs against real PostgreSQL, never SQLite: the schema under
+    # test carries CHECK constraints, RESTRICT foreign keys and enum columns
+    # that SQLite either ignores or does not have. Testing on another engine
+    # would prove nothing about the guarantees this application relies on.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: lateral
+          POSTGRES_PASSWORD: lateral
+          POSTGRES_DB: lateral
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lateral -d lateral"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      POSTGRES_USER: lateral
+      POSTGRES_PASSWORD: lateral
+      POSTGRES_DB: lateral
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      # Settings refuses to start without a signing key. This one is a CI
+      # throwaway and never leaves the runner.
+      SECRET_KEY: ci-signing-key-not-used-outside-ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - run: pip install -r requirements-dev.txt
+
+      - name: Format
+        run: ruff format --check .
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Typecheck
+        run: mypy app
+
+      # pytest builds the test schema by applying the migrations, so a broken
+      # migration fails here rather than on a deploy.
+      - name: Test
+        run: pytest
+
+      # Catches the opposite drift: a model edited without a matching revision.
+      - name: Migration drift
+        run: |
+          alembic upgrade head
+          alembic check
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
