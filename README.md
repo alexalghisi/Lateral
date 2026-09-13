@@ -1,5 +1,7 @@
 # Lateral
 
+[![CI](https://github.com/alexalghisi/Lateral/actions/workflows/ci.yml/badge.svg)](https://github.com/alexalghisi/Lateral/actions/workflows/ci.yml)
+
 A small takeaway platform. Customers browse restaurants and menus, place orders,
 and track them from `pending` to `delivered`; staff (admin) manage the catalogue
 and advance orders. A FastAPI backend, plus a React web client served from the
@@ -169,11 +171,16 @@ ever changed by Alembic migrations, which run automatically on container start;
 `alembic check` catches model/migration drift.
 
 ```bash
+docker compose exec -T api ruff format --check . && \
 docker compose exec -T api ruff check . && \
 docker compose exec -T api mypy app && \
 docker compose exec -T api pytest && \
 docker compose exec -T api alembic check
 ```
+
+GitHub Actions runs exactly these five gates against a PostgreSQL 16 service on
+every push and pull request, plus `npm run typecheck` and `npm run build` for
+the web client — see `.github/workflows/ci.yml`.
 
 ---
 
