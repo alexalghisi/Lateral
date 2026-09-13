@@ -1,15 +1,16 @@
 # Lateral
 
-A backend for a small takeaway platform. Customers browse restaurants and menus,
-place orders, and track them from `pending` to `delivered`; staff (admin) manage
-the catalogue and advance orders.
+A small takeaway platform. Customers browse restaurants and menus, place orders,
+and track them from `pending` to `delivered`; staff (admin) manage the catalogue
+and advance orders. A FastAPI backend, plus a React web client served from the
+same origin.
 
 <p align="center">
   <img src="docs/assets/how-it-works.gif" width="960" alt="A customer browses Trattoria Lateral, orders two Margheritas, and tracks the order from pending to delivered, with the matching API calls beside the phone." />
 </p>
 
-Built with FastAPI, PostgreSQL, SQLAlchemy + Alembic, Pydantic, JWT, Docker
-Compose and Nginx.
+Built with FastAPI, PostgreSQL, SQLAlchemy + Alembic, Pydantic, JWT, React +
+TypeScript, Docker Compose and Nginx.
 
 **Author:** Alghisi Alessandro Paolo — <alexalghisi@gmail.com>
 
@@ -28,11 +29,12 @@ docker compose up --build -d
 curl http://localhost:8080/health/ready   # {"status":"ready"}
 ```
 
-`docker compose up` builds the image, starts PostgreSQL, **applies migrations
-automatically**, and serves the API behind Nginx at <http://localhost:8080>
-(Swagger at `/docs`, suppressed when `APP_ENV=production`). Every setting is read
-from the environment — see `.env.example`; `SECRET_KEY` has no default and the
-app refuses to start without it.
+`docker compose up` builds both images, starts PostgreSQL, **applies migrations
+automatically**, and serves the web app and the API behind one Nginx at
+<http://localhost:8080> (Swagger at `/docs`, suppressed when
+`APP_ENV=production`). Every setting is read from the environment — see
+`.env.example`; `SECRET_KEY` has no default and the app refuses to start
+without it.
 
 ```bash
 docker compose exec -T api pytest   # 130 tests
@@ -43,7 +45,10 @@ docker compose down                 # stop (add -v to wipe the database)
 
 ## Architecture
 
-Nginx → Uvicorn/FastAPI → PostgreSQL. Each layer has one job:
+Browser → Nginx → Uvicorn/FastAPI → PostgreSQL. Nginx serves the compiled SPA
+and proxies `/api`, `/health` and the docs to the app server, so the whole
+product answers on **one origin** — every request the browser makes is
+same-origin and there is no CORS to configure anywhere. Each layer has one job:
 
 - **Routers** (`app/api/routes/`) — HTTP in, call a service, return; auth is
   declared in the signature (`CurrentUser` / `CurrentAdmin`).
@@ -87,6 +92,30 @@ the first admin is promoted out-of-band
 
 Status codes: `401` bad/missing token · `403` wrong role · `404` absent *or* not
 yours · `409` conflicts with current state · `422` malformed.
+
+---
+
+## Web client
+
+A React + TypeScript SPA (Vite, React Router, TanStack Query) in `frontend/`:
+browse restaurants, build a basket, place an order and watch it advance on a
+live tracker; admins get catalogue management and the staff order queue.
+
+It calls the API with **relative paths only** (`/api/v1/...`) — Nginx serves it
+in production and Vite proxies the same paths in development, so there is no
+base URL to configure and no CORS in either environment. `frontend/src/api/`
+holds a typed `fetch` wrapper and hand-written mirrors of the response schemas,
+so a contract change surfaces as a compile error rather than a runtime
+`undefined`. The order state machine is mirrored from
+`app/domain/order_state.py` to offer only legal next actions — the server
+remains the authority and re-checks every transition.
+
+```bash
+cd frontend && npm ci
+npm run dev        # http://localhost:5173, proxying to the stack on :8080
+npm run typecheck  # tsc, strict
+npm run build      # tsc -b && vite build
+```
 
 ---
 
@@ -152,7 +181,8 @@ docker compose exec -T api alembic check
 
 ```
 app/  api · core · db · domain · models · repositories · schemas · services · main.py
-docker/  api/{Dockerfile,entrypoint.sh} · nginx/default.conf
+frontend/  src/{api,auth,components,pages} · vite.config.ts · package.json
+docker/  api/{Dockerfile,entrypoint.sh} · frontend/Dockerfile · nginx/default.conf
 migrations/ · tests/ · docker-compose.yml · pyproject.toml · .env.example
 ```
 
@@ -160,4 +190,5 @@ migrations/ · tests/ · docker-compose.yml · pyproject.toml · .env.example
 
 **Alghisi Alessandro Paolo** — <alexalghisi@gmail.com> ·
 <https://github.com/alexalghisi> · a technical-challenge submission built
-test-first with FastAPI, PostgreSQL, SQLAlchemy, Alembic, Docker and Nginx.
+test-first with FastAPI, PostgreSQL, SQLAlchemy, Alembic, React, Docker and
+Nginx.
